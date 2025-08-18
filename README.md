@@ -17,17 +17,36 @@
 ![Stars](https://img.shields.io/github/stars/patrik-fredon/crispy-goggles?style=social)
 ![Last Commit](https://img.shields.io/github/last-commit/patrik-fredon/crispy-goggles)
 
----
+![Open Issues](https://img.shields.io/github/issues/patrik-fredon/crispy-goggles)
+![Open PRs](https://img.shields.io/github/issues-pr/patrik-fredon/crispy-goggles)
 
 > **crispy-goggles**: Because your Linux desktop deserves more than just numbers.
 
 Welcome to the _Waybar Hardware Info Module_ — a project crafted by a real developer (yes, a human, not a bot) who loves clean code, sharp UIs, and a dash of wit. If you want your Waybar to show off your CPU, RAM, GPU, and disk stats in real time (and look good doing it), you’re in the right place.
 
----
-
 ## ⭐ Why crispy-goggles?
 
-- **Instant Hardware Monitoring:** Get live CPU, RAM, temperature, and device stats right in your Waybar. No more guessing what’s cooking under the hood.
+## 📚 Documentation & Community
+
+- [Contribution Guidelines](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [License](LICENSE)
+- [Discussions](../../discussions)
+- [Report Issues](../../issues)
+- [Request Features](../../issues)
+
+## 🤝 Community Standards
+
+We follow the highest standards for open source collaboration:
+
+- Clear [contribution guidelines](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md) for a welcoming environment
+- [Security policy](SECURITY.md)
+- [Issue and PR templates](.github/ISSUE_TEMPLATE/)
+- [Support](SUPPORT.md) and [Funding](.github/FUNDING.yml) options
+
+Join the conversation, suggest features, or help squash bugs! See the [Discussions](../../discussions) tab or open an [issue](../../issues).
+
 - **Ridiculously Easy Install:** One command. One script. Done. (Because your time is valuable.)
 - **Customizable & Stylish:** Includes CSS and JSONC snippets so you can make it yours. Minimalist? Maximalist? You do you.
 - **Open Source, MIT, and Proud:** Fork it, star it, break it, fix it. It’s your playground.

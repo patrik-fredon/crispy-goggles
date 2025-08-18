@@ -1,0 +1,49 @@
+name: "🐞 Bug Report"
+description: "Report a bug to help us improve."
+title: "[BUG] <short description>"
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - type: input
+    id: what-happened
+    attributes:
+      label: "What happened?"
+      description: "Describe the bug in detail."
+      placeholder: "A clear and concise description of what the bug is."
+    validations:
+      required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: "Steps to Reproduce"
+      description: "How can we reproduce the bug?"
+      placeholder: "1. Go to ...\n2. Click on ...\n3. See error"
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: "Expected Behavior"
+      description: "What did you expect to happen?"
+      placeholder: "A clear and concise description of what you expected to happen."
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: "Environment"
+      description: "Please provide your OS, Waybar version, and any relevant details."
+      placeholder: "e.g., Arch Linux, Waybar 0.9.10, ..."
+    validations:
+      required: false
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: "Additional Context"
+      description: "Add any other context about the problem here."
+      placeholder: "Screenshots, logs, etc."
+    validations:
+      required: false
