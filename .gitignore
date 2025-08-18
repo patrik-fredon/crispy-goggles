@@ -43,3 +43,4 @@ htmlcov/
 # Ignore local config
 config.local.jsonc
 docs/Implementation-plan.md
+.copilot-todo.md

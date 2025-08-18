@@ -119,6 +119,7 @@ def get_ram_info():
 def get_gpu_info():
     """Get GPU stats (NVIDIA/AMD). If you have one, flex it."""
     gpus = []
+    error_msgs = []
     # Try NVIDIA first
     if NVML_AVAILABLE:
         try:
@@ -155,12 +156,17 @@ def get_gpu_info():
             pynvml.nvmlShutdown()
         except Exception as e:
             logger.debug(f"Error getting NVIDIA GPU info: {e}")
+            error_msgs.append(
+                "NVIDIA GPU detected but could not retrieve info. Check driver and permissions."
+            )
+    elif not NVML_AVAILABLE:
+        error_msgs.append(
+            "NVIDIA GPU support not available (pynvml not installed). Run: pip install pynvml"
+        )
 
     # Try AMD if NVIDIA not found or failed
-
     if not gpus and AMDGPU_AVAILABLE and pyamdgpuinfo is not None:
         try:
-            # pyamdgpuinfo.get_gpu_count() returns the number of AMD GPUs
             device_count = (
                 pyamdgpuinfo.detect_gpus()
                 if hasattr(pyamdgpuinfo, "detect_gpus")
@@ -209,7 +215,38 @@ def get_gpu_info():
                 gpus.append(gpu_info)
         except Exception as e:
             logger.debug(f"Error getting AMD GPU info: {e}")
+            error_msgs.append(
+                "AMD GPU detected but could not retrieve info. Check driver and permissions."
+            )
+    elif not gpus and not AMDGPU_AVAILABLE:
+        error_msgs.append(
+            "AMD GPU support not available (pyamdgpuinfo not installed or no AMD GPU detected). Run: pip install pyamdgpuinfo"
+        )
 
+    # If no GPUs found, add user-facing error message
+    if not gpus:
+        # Try to detect if running as root or user
+        is_root = os.geteuid() == 0 if hasattr(os, "geteuid") else False
+        perm_msg = (
+            " (try running as root or check group permissions)" if not is_root else ""
+        )
+        error_msgs.append(
+            "No supported GPU detected or insufficient permissions" + perm_msg
+        )
+    # Return gpus, but if empty, return a special error info for user-facing output
+    if not gpus and error_msgs:
+        # Return a pseudo-GPU entry with error info for user display
+        return [
+            {
+                "name": "Not Detected",
+                "mem_total_gb": 0,
+                "mem_used_gb": 0,
+                "mem_percent": 0,
+                "util_percent": 0,
+                "temp": None,
+                "error": "; ".join(error_msgs),
+            }
+        ]
     return gpus
 
 
@@ -350,11 +387,14 @@ def format_tooltip(cpu, ram, gpus, disks):
     if gpus:
         tooltip_parts.append("<b>GPUs:</b>")
         for i, gpu in enumerate(gpus):
-            gpu_str = f"  {gpu['name']}: Util {gpu['util_percent']:.1f}%, Mem {gpu['mem_used_gb']:.2f}G/{gpu['mem_total_gb']:.2f}G ({gpu['mem_percent']:.1f}%)"
-            if gpu["temp"] is not None:
-                unit = "°F" if USE_FAHRENHEIT else "°C"
-                gpu_str += f" ({gpu['temp']}{unit})"
-            tooltip_parts.append(gpu_str)
+            if gpu.get("error"):
+                tooltip_parts.append(f"  GPU Error: {gpu['error']}")
+            else:
+                gpu_str = f"  {gpu['name']}: Util {gpu['util_percent']:.1f}%, Mem {gpu['mem_used_gb']:.2f}G/{gpu['mem_total_gb']:.2f}G ({gpu['mem_percent']:.1f}%)"
+                if gpu["temp"] is not None:
+                    unit = "°F" if USE_FAHRENHEIT else "°C"
+                    gpu_str += f" ({gpu['temp']}{unit})"
+                tooltip_parts.append(gpu_str)
     else:
         tooltip_parts.append("GPU: Not Detected")
 
