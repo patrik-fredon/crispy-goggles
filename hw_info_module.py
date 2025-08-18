@@ -31,6 +31,57 @@ Install with:
         # For AMD: pip install pyamdgpuinfo
         # For disk info: pip install smartie
 
+            # Intel GPU detection (lspci, lshw, /proc)
+            def detect_intel_gpu():
+                import re
+                gpus = []
+                error_msgs = []
+                # Try lspci
+                try:
+                    lspci_out = subprocess.check_output(["lspci", "-nnk"], text=True)
+                    intel_gpus = [line for line in lspci_out.splitlines() if re.search(r'VGA compatible controller: Intel|3D controller: Intel', line)]
+                    for line in intel_gpus:
+                        name = line.split(':', 2)[-1].strip()
+                        gpus.append({
+                            "name": name,
+                            "mem_total_gb": 0,
+                            "mem_used_gb": 0,
+                            "mem_percent": 0,
+                            "util_percent": 0,
+                            "temp": None,
+                        })
+                    if not intel_gpus:
+                        error_msgs.append("No Intel GPU found via lspci.")
+                except FileNotFoundError:
+                    error_msgs.append("lspci not found. Install pciutils.")
+                except Exception as e:
+                    error_msgs.append(f"lspci error: {e}")
+                # Fallback: lshw
+                if not gpus:
+                    try:
+                        lshw_out = subprocess.check_output(["lshw", "-C", "display"], text=True)
+                        if "Intel" in lshw_out:
+                            for block in lshw_out.split("*-display"):
+                                if "Intel" in block:
+                                    name = next((line.split(":",1)[-1].strip() for line in block.splitlines() if "product:" in line), "Intel GPU")
+                                    gpus.append({
+                                        "name": name,
+                                        "mem_total_gb": 0,
+                                        "mem_used_gb": 0,
+                                        "mem_percent": 0,
+                                        "util_percent": 0,
+                                        "temp": None,
+                                    })
+                        else:
+                            error_msgs.append("No Intel GPU found via lshw.")
+                    except FileNotFoundError:
+                        error_msgs.append("lshw not found. Install lshw.")
+                    except Exception as e:
+                        error_msgs.append(f"lshw error: {e}")
+                # Fallback: /proc/driver/i915 or /sys/class/drm
+                # (Not implemented for brevity, but could be added for more detail)
+                return gpus, error_msgs
+
 Written by Fredon — because your desktop deserves a little more swagger.
 """
 
@@ -48,8 +99,8 @@ try:
 
     NVML_AVAILABLE = True
 except ImportError:
-    NVML_AVAILABLE = False
     pynvml = None
+    NVML_AVAILABLE = False
 
 try:
     import pyamdgpuinfo
@@ -73,13 +124,16 @@ UPDATE_INTERVAL = 2  # How often to update (seconds)
 USE_FAHRENHEIT = False  # Set True if you like your temps American-style
 # ----------------
 
+
 # Logging: If something goes sideways, you’ll know
+LOGLEVEL = os.environ.get("HWINFO_LOGLEVEL", "WARNING").upper()
 logging.basicConfig(
-    level=logging.WARNING,
+    level=getattr(logging, LOGLEVEL, logging.WARNING),
     stream=sys.stderr,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+logger.info(f"Log level set to {LOGLEVEL}")
 
 
 def get_cpu_info():
@@ -120,11 +174,20 @@ def get_gpu_info():
     """Get GPU stats (NVIDIA/AMD). If you have one, flex it."""
     gpus = []
     error_msgs = []
+
+    logger.info("Starting GPU detection...")
+    logger.debug(
+        f"NVML_AVAILABLE={NVML_AVAILABLE}, AMDGPU_AVAILABLE={AMDGPU_AVAILABLE}, SMARTIE_AVAILABLE={SMARTIE_AVAILABLE}"
+    )
     # Try NVIDIA first
     if NVML_AVAILABLE:
         try:
+            import pynvml
+
+            logger.info("Attempting NVIDIA GPU detection via pynvml...")
             pynvml.nvmlInit()
             device_count = pynvml.nvmlDeviceGetCount()
+            logger.debug(f"NVIDIA device count: {device_count}")
             for i in range(device_count):
                 handle = pynvml.nvmlDeviceGetHandleByIndex(i)
                 name = pynvml.nvmlDeviceGetName(handle)
@@ -135,15 +198,28 @@ def get_gpu_info():
                 temp_info = pynvml.nvmlDeviceGetTemperature(
                     handle, pynvml.NVML_TEMPERATURE_GPU
                 )
-
+                # Defensive: ensure mem_info.total and mem_info.used are numbers
+                mem_total = mem_info.total
+                mem_used = mem_info.used
+                if isinstance(mem_total, (bytes, str)):
+                    try:
+                        mem_total = int(mem_total)
+                    except Exception:
+                        mem_total = 0
+                if isinstance(mem_used, (bytes, str)):
+                    try:
+                        mem_used = int(mem_used)
+                    except Exception:
+                        mem_used = 0
+                logger.debug(
+                    f"NVIDIA GPU {i}: {name}, mem_total={mem_total}, mem_used={mem_used}, util={util_info.gpu}, temp={temp_info}"
+                )
                 gpu = {
                     "name": name,
-                    "mem_total_gb": round(mem_info.total / (1024**3), 2),
-                    "mem_used_gb": round(mem_info.used / (1024**3), 2),
+                    "mem_total_gb": round(mem_total / (1024**3), 2) if mem_total else 0,
+                    "mem_used_gb": round(mem_used / (1024**3), 2) if mem_used else 0,
                     "mem_percent": (
-                        round((mem_info.used / mem_info.total) * 100, 1)
-                        if mem_info.total > 0
-                        else 0
+                        round((mem_used / mem_total) * 100, 1) if mem_total > 0 else 0
                     ),
                     "util_percent": util_info.gpu,
                     "temp": (
@@ -154,28 +230,39 @@ def get_gpu_info():
                 }
                 gpus.append(gpu)
             pynvml.nvmlShutdown()
+            logger.info(f"NVIDIA GPU detection complete. Found {len(gpus)} GPUs.")
         except Exception as e:
-            logger.debug(f"Error getting NVIDIA GPU info: {e}")
+            logger.error(f"Error getting NVIDIA GPU info: {e}", exc_info=True)
             error_msgs.append(
                 "NVIDIA GPU detected but could not retrieve info. Check driver and permissions."
             )
     elif not NVML_AVAILABLE:
+        logger.warning("pynvml not installed; NVIDIA GPU support not available.")
         error_msgs.append(
             "NVIDIA GPU support not available (pynvml not installed). Run: pip install pynvml"
         )
+    # Check for missing pynvml module
+    try:
+        import pynvml
+    except ImportError:
+        logger.warning("Python module 'pynvml' is missing.")
+        error_msgs.append("Python module 'pynvml' is missing. Run: pip install pynvml")
 
     # Try AMD if NVIDIA not found or failed
     if not gpus and AMDGPU_AVAILABLE and pyamdgpuinfo is not None:
         try:
+            logger.info("Attempting AMD GPU detection via pyamdgpuinfo...")
             device_count = (
                 pyamdgpuinfo.detect_gpus()
                 if hasattr(pyamdgpuinfo, "detect_gpus")
                 else pyamdgpuinfo.get_gpu_count()
             )
+            logger.debug(f"AMD device count: {device_count}")
             for i in range(device_count):
                 try:
                     name = pyamdgpuinfo.get_gpu_name(i)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Failed to get AMD GPU name for device {i}: {e}")
                     name = "AMD GPU"
                 try:
                     vram_total = pyamdgpuinfo.get_vram_size(i)
@@ -185,19 +272,25 @@ def get_gpu_info():
                         if vram_total > 0
                         else 0
                     )
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Failed to get AMD VRAM info for device {i}: {e}")
                     vram_total, vram_used, mem_percent = 0, 0, 0
                 try:
                     util_percent = pyamdgpuinfo.get_gpu_load(i)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Failed to get AMD GPU load for device {i}: {e}")
                     util_percent = 0
                 try:
                     temp = pyamdgpuinfo.get_temp(i)
                     if USE_FAHRENHEIT:
                         temp = round((temp * 9 / 5) + 32, 1)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Failed to get AMD GPU temp for device {i}: {e}")
                     temp = None
 
+                logger.debug(
+                    f"AMD GPU {i}: {name}, vram_total={vram_total}, vram_used={vram_used}, util={util_percent}, temp={temp}"
+                )
                 gpu_info = {
                     "name": name,
                     "mem_total_gb": (
@@ -213,18 +306,43 @@ def get_gpu_info():
                     "temp": temp,
                 }
                 gpus.append(gpu_info)
+            logger.info(f"AMD GPU detection complete. Found {len(gpus)} GPUs.")
         except Exception as e:
-            logger.debug(f"Error getting AMD GPU info: {e}")
+            logger.error(f"Error getting AMD GPU info: {e}", exc_info=True)
             error_msgs.append(
                 "AMD GPU detected but could not retrieve info. Check driver and permissions."
             )
     elif not gpus and not AMDGPU_AVAILABLE:
+        logger.warning("pyamdgpuinfo not installed or no AMD GPU detected.")
         error_msgs.append(
             "AMD GPU support not available (pyamdgpuinfo not installed or no AMD GPU detected). Run: pip install pyamdgpuinfo"
+        )
+    # Check for missing pyamdgpuinfo module
+    # Only warn if pyamdgpuinfo is not available
+    if pyamdgpuinfo is None:
+        logger.warning("Python module 'pyamdgpuinfo' is missing.")
+        error_msgs.append(
+            "Python module 'pyamdgpuinfo' is missing. Run: pip install pyamdgpuinfo"
+        )
+    # Check for missing lspci and lshw tools (Intel and fallback detection)
+    import shutil
+
+    if shutil.which("lspci") is None:
+        logger.warning(
+            "'lspci' not found in PATH. Intel GPU detection will be limited."
+        )
+        error_msgs.append(
+            "'lspci' not found in PATH. Install pciutils for Intel GPU detection."
+        )
+    if shutil.which("lshw") is None:
+        logger.warning("'lshw' not found in PATH. Intel GPU detection will be limited.")
+        error_msgs.append(
+            "'lshw' not found in PATH. Install lshw for Intel GPU detection."
         )
 
     # If no GPUs found, add user-facing error message
     if not gpus:
+        logger.warning("No supported GPU detected or insufficient permissions.")
         # Try to detect if running as root or user
         is_root = os.geteuid() == 0 if hasattr(os, "geteuid") else False
         perm_msg = (
@@ -233,8 +351,17 @@ def get_gpu_info():
         error_msgs.append(
             "No supported GPU detected or insufficient permissions" + perm_msg
         )
+        # Suggest running with sudo if permission denied
+        if not is_root:
+            logger.info(
+                "Suggest running with elevated privileges or checking group membership."
+            )
+            error_msgs.append(
+                "If you see permission errors, try running with elevated privileges (sudo) or check your user group membership (e.g., video group)."
+            )
     # Return gpus, but if empty, return a special error info for user-facing output
     if not gpus and error_msgs:
+        logger.error(f"GPU detection failed: {'; '.join(error_msgs)}")
         # Return a pseudo-GPU entry with error info for user display
         return [
             {
@@ -247,6 +374,7 @@ def get_gpu_info():
                 "error": "; ".join(error_msgs),
             }
         ]
+    logger.info(f"GPU detection complete. Found {len(gpus)} GPUs.")
     return gpus
 
 
